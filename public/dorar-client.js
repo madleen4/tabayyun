@@ -8,7 +8,6 @@ import { parseDorarData } from '/lib/dorar.js';
 
 const DORAR_ENDPOINTS = [
   'https://dorar.net/dorar_api.json',
-  'https://www.dorar.net/dorar_api.json',
 ];
 
 const JSONP_TIMEOUT = 12000;
