@@ -84,22 +84,22 @@ export function removalRange(text, it) {
 }
 
 // يبني النص المصحح من اختيارات المستخدم.
-// choice: { mode: 'keep' | 'source' | 'full' | 'alt' | 'remove', alt }
+// choice: { mode: 'keep' | 'source' | 'alt' | 'remove', alt }
 // يعيد النص، ومواضع الأحاديث فيه (لحمايتها عند تعديل الصياغة)، ومواضع التعديلات، والمصادر.
 export function buildCorrected(text, items, choices) {
   const edits = [];
   const sources = [];
   items.forEach((it, i) => {
     const c = choices[i] || { mode: 'keep' };
-    if (c.mode === 'source' && it.diff?.sourceWindow) {
-      edits.push({ i, start: it.start, end: it.end, text: flat(it.diff.sourceWindow) });
-      sources.push(`«${flat(it.diff.sourceWindow)}» ${citation(it.diff.ref)}.`);
+    const full = it.full?.text && it.full.text.length <= FULL_MAX ? it.full : null;
+    if (c.mode === 'source' && (full || it.diff?.sourceWindow)) {
+      // لفظ المصدر: الحديث كاملاً إن اقتبس المستخدم جزءاً منه، وإلا الموضع المطابق
+      const txt = flat(full ? full.text : it.diff.sourceWindow);
+      edits.push({ i, start: it.start, end: it.end, text: txt });
+      sources.push(`«${txt}» ${citation(full || it.diff.ref)}.`);
     } else if (c.mode === 'alt' && c.alt) {
       edits.push({ i, start: it.start, end: it.end, text: flat(c.alt.text) });
       sources.push(`«${flat(c.alt.text)}»${c.alt.partial ? ' (جزء من حديث)' : ''} ${citation(c.alt)}.`);
-    } else if (c.mode === 'full' && it.full?.text) {
-      edits.push({ i, start: it.start, end: it.end, text: flat(it.full.text) });
-      sources.push(`«${flat(it.full.text)}» ${citation(it.full)}.`);
     } else if (c.mode === 'remove') {
       edits.push({ i, ...removalRange(text, it), text: '', remove: true });
     } else if (it.status === 'ثابت' && it.diff?.ref && !it.diff.distorted) {

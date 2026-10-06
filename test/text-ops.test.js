@@ -170,7 +170,7 @@ test('الحديث أطول في المصدر: يُعرض كاملاً ويُت�
   const text = 'قال ﷺ: «طلب العلم فريضة على كل مسلم».';
   const start = text.indexOf('طلب');
   const it = { quote: 'طلب العلم فريضة على كل مسلم', start, end: start + 27, status: 'ضعيف', full: ref };
-  const out = buildCorrected(text, [it], [{ mode: 'full' }]);
+  const out = buildCorrected(text, [it], [{ mode: 'source' }]);
   assert.ok(out.text.includes('كمقلد الخنازير'));
   assert.ok(out.sources[0].includes('سنن ابن ماجه (224)'));
 });

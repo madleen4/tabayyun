@@ -152,7 +152,7 @@ function rulingsBlock(judged) {
   const d = el('details');
   d.append(el('summary', '', `أحكام المحدثين (${AR(judged.length)})`));
   const ul = el('ul', 'rulings');
-  for (const j of judged.slice(0, 8)) {
+  for (const j of judged) {
     const li = el('li');
     li.append(el('span', 'rtext', `«${j.text}»`));
     li.append(el('span', 'rmeta', [j.muhaddith, j.source, j.number].filter(Boolean).join('، ')));
@@ -180,19 +180,22 @@ function diffBox(diff) {
   return box;
 }
 
-function fullBox(full) {
-  const box = el('div', 'box');
-  box.append(el('h3', '', 'الحديث كاملاً في المصدر'));
-  box.append(el('p', 'words src', `«${full.text}»`));
-  box.append(el('p', 'rmeta', [full.muhaddith, full.source, full.number, full.ruling].filter(Boolean).join('، ')));
-  return box;
-}
-
 function option(name, label, checked, onChange, extra, iconName = 'check', labelClass = '') {
   const l = el('label', 'opt');
   const r = document.createElement('input');
   r.type = 'radio'; r.name = name; r.checked = checked;
-  r.addEventListener('change', onChange);
+  if (checked) r.dataset.on = '1';
+  // الضغط على الخيار المختار يلغيه، فيبقى النص كما هو
+  r.addEventListener('click', () => {
+    if (r.dataset.on === '1') {
+      r.checked = false; r.dataset.on = '';
+      r.closest('.opts')?._off?.();
+      return;
+    }
+    document.querySelectorAll(`input[name="${name}"]`).forEach((x) => { x.dataset.on = ''; });
+    r.dataset.on = '1';
+    onChange();
+  });
   const body = el('span', 'optbody');
   body.append(el('span', labelClass, label));
   if (extra) body.append(...extra);
@@ -231,16 +234,13 @@ function renderItem(it, idx) {
   const opts = el('div', 'opts');
   const name = `c${idx}`;
   const set = (choice) => () => { state.choices[idx] = choice; updateCorrected(); };
-  opts.append(option(name, 'إبقاء النص كما هو', true, set({ mode: 'keep' }), null, 'check'));
+  opts._off = set({ mode: 'keep' }); // لا خيار «إبقاء»: عدم الاختيار يعني إبقاء النص
 
-  if (it.diff?.distorted && it.diff.sourceWindow && it.status !== 'لم يُعثر عليه') {
-    card.append(diffBox(it.diff));
-    opts.append(option(name, 'استبدال اللفظ بلفظ المصدر', false, set({ mode: 'source' }), null, 'swap'));
-  }
-
-  if (it.full && it.status !== 'لم يُعثر عليه') {
-    card.append(fullBox(it.full));
-    if (it.full.text.length <= FULL_MAX) opts.append(option(name, 'استبدال بالحديث كاملاً من المصدر', false, set({ mode: 'full' }), null, 'swap'));
+  // استبدال واحد بلفظ المصدر: الحديث كاملاً إن كان المستخدم اقتبس جزءاً منه (وما لم يطل جداً)
+  const distorted = it.diff?.distorted && it.diff.sourceWindow && it.status !== 'لم يُعثر عليه';
+  if (distorted) card.append(diffBox(it.diff));
+  if (distorted || (it.full && it.full.text.length <= FULL_MAX && it.status !== 'لم يُعثر عليه')) {
+    opts.append(option(name, 'استبدال بلفظ المصدر', false, set({ mode: 'source' }), null, 'swap'));
   }
 
   if (['ضعيف', 'موضوع', 'مختلف فيه', 'لم يُعثر عليه'].includes(it.status)) {
@@ -271,8 +271,7 @@ function renderItem(it, idx) {
     opts.append(btn);
   }
 
-  // لا داعي للخيارات إن لم يوجد إلا «إبقاء النص»
-  if (opts.children.length > 1) card.append(el('p', 'choose', 'ماذا تريد أن تفعل بهذا الحديث؟'), opts);
+  if (opts.children.length) card.append(el('p', 'choose', 'ماذا تريد أن تفعل بهذا الحديث؟ (اضغط الخيار مرة أخرى لإلغائه)'), opts);
   if (it.judged?.length) card.append(rulingsBlock(it.judged));
   return li;
 }
