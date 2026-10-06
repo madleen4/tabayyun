@@ -1,6 +1,6 @@
-// الوصول إلى الموسوعة الحديثية في الدرر السنية.
-// عرض لحظي فقط: لا تخزين ولا إعادة نشر لنتائج الدرر.
-// JSONP هي الطريقة الرسمية الموثقة لأصحاب المواقع، مع إبقاء fetch كخيار إضافي.
+// أدوات تحليل نتائج الموسوعة الحديثية في الدرر السنية.
+// هذا الملف لا يجري أي طلب مباشر من المتصفح.
+// الاتصال بالدرر يتم من dorar-client.js عبر JSONP أو عبر خادم تبيّن.
 
 const API = 'https://dorar.net/dorar_api.json';
 
@@ -12,94 +12,168 @@ const FIELDS = [
   ['ruling', 'خلاصة حكم المحدث:'],
 ];
 
-function decodeEntities(s) {
-  return String(s || '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&#x27;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
+function decodeEntities(value) {
+  return String(value || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&#x27;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
 }
 
 function stripTags(html) {
-  return decodeEntities(String(html || '').replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, ' '))
+  return decodeEntities(
+    String(html || '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+  )
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// يحوّل بطاقة المعلومات إلى حقول، ولا يفترض وجود كل الحقول.
 function parseInfo(infoHtml) {
-  const out = { rawi: '', muhaddith: '', source: '', number: '', ruling: '' };
+  const out = {
+    rawi: '',
+    muhaddith: '',
+    source: '',
+    number: '',
+    ruling: '',
+  };
+
   const html = String(infoHtml || '');
 
-  // الشكل الحديث للموقع: <span class="info-subtitle">العنوان:</span> القيمة
-  const parts = html.split(/<span[^>]*class=["'][^"']*info-subtitle[^"']*["'][^>]*>/i).slice(1);
+  // الشكل الحديث لنتائج الدرر.
+  const parts = html
+    .split(
+      /<span[^>]*class=["'][^"']*info-subtitle[^"']*["'][^>]*>/i
+    )
+    .slice(1);
+
   for (const part of parts) {
     const text = stripTags(part);
+
     for (const [key, label] of FIELDS) {
-      if (text.startsWith(label)) {
-        // نوقف القيمة قبل العنوان التالي إذا جُمعت عدة حقول في نفس المقطع.
-        let value = text.slice(label.length).trim();
-        for (const [, nextLabel] of FIELDS) {
-          const at = value.indexOf(nextLabel);
-          if (at > 0) value = value.slice(0, at).trim();
+      if (!text.startsWith(label)) continue;
+
+      let value = text.slice(label.length).trim();
+
+      for (const [, nextLabel] of FIELDS) {
+        const at = value.indexOf(nextLabel);
+
+        if (at > 0) {
+          value = value.slice(0, at).trim();
         }
-        out[key] = value.replace(/^[|،\s]+|[|،\s]+$/g, '');
-        break;
       }
+
+      out[key] = value
+        .replace(/^[|،\s]+|[|،\s]+$/g, '')
+        .trim();
+
+      break;
     }
   }
 
-  // إذا كان الشكل الحديث موجودًا، فالحقول غير الموجودة تبقى فارغة.
-  // هذا يمنع التباس «المحدث:» داخل عبارة «خلاصة حكم المحدث:».
-  if (parts.length) return out;
+  if (parts.length) {
+    return out;
+  }
 
-  // fallback للشكل القديم/المسطح: نقسم النص عند جميع العناوين دفعة واحدة،
-  // مع تقديم العناوين الأطول حتى لا تُقرأ «المحدث:» من داخل «خلاصة حكم المحدث:».
+  // دعم الشكل القديم/المسطح.
   const flat = stripTags(html);
-  const labelToKey = new Map(FIELDS.map(([key, label]) => [label, key]));
-  const labels = [...labelToKey.keys()].sort((a, b) => b.length - a.length);
-  const escaped = labels.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+  const labelToKey = new Map(
+    FIELDS.map(([key, label]) => [label, key])
+  );
+
+  const labels = [...labelToKey.keys()].sort(
+    (a, b) => b.length - a.length
+  );
+
+  const escaped = labels.map((label) =>
+    label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  );
+
   const re = new RegExp(`(${escaped.join('|')})`, 'g');
   const matches = [...flat.matchAll(re)];
+
   for (let i = 0; i < matches.length; i++) {
     const label = matches[i][1];
     const key = labelToKey.get(label);
+
     if (!key || out[key]) continue;
+
     const start = matches[i].index + label.length;
-    const end = i + 1 < matches.length ? matches[i + 1].index : flat.length;
-    out[key] = flat.slice(start, end).replace(/^[|،\s]+|[|،\s]+$/g, '').trim();
+
+    const end =
+      i + 1 < matches.length
+        ? matches[i + 1].index
+        : flat.length;
+
+    out[key] = flat
+      .slice(start, end)
+      .replace(/^[|،\s]+|[|،\s]+$/g, '')
+      .trim();
   }
+
   return out;
 }
 
-// تقسيم مرن لبطاقات النتائج في الشكل الحديث والقديم.
 function blocksFromHtml(html) {
-  const s = String(html || '');
-  if (!s.trim()) return [];
+  const value = String(html || '');
 
-  const modern = s.split(/<div[^>]*class=["'][^"']*hadith(?:\s[^"']*)?["'][^>]*>/i).slice(1);
-  if (modern.length) return modern;
+  if (!value.trim()) {
+    return [];
+  }
 
-  // بعض نسخ API القديمة ترجع كل نتيجة داخل item.th دون div.hadith واضح.
-  // نقسمها عند ظهور «خلاصة حكم المحدث» مع الاحتفاظ بالنص السابق لكل بطاقة.
-  const markers = [...s.matchAll(/خلاصة حكم المحدث\s*:/g)].map((m) => m.index);
-  if (!markers.length) return [s];
-  const out = [];
+  // الشكل الحديث.
+  const modern = value
+    .split(
+      /<div[^>]*class=["'][^"']*hadith(?:\s[^"']*)?["'][^>]*>/i
+    )
+    .slice(1);
+
+  if (modern.length) {
+    return modern;
+  }
+
+  // بعض استجابات API القديمة لا تحتوي div.hadith واضح.
+  const markers = [
+    ...value.matchAll(/خلاصة حكم المحدث\s*:/g),
+  ].map((match) => match.index);
+
+  if (!markers.length) {
+    return [value];
+  }
+
+  const blocks = [];
   let start = 0;
+
   for (let i = 0; i < markers.length; i++) {
-    const next = i + 1 < markers.length ? markers[i + 1] : s.length;
-    // نبحث للخلف عن بداية نتيجة قريبة (رقم - / <span class=result> / <div>)
-    let begin = s.lastIndexOf('<div', markers[i]);
-    const span = s.lastIndexOf('<span', markers[i]);
-    if (span > begin) begin = span;
-    if (begin < start) begin = start;
-    if (i === 0) begin = Math.max(0, begin);
-    out.push(s.slice(begin, next));
+    const next =
+      i + 1 < markers.length
+        ? markers[i + 1]
+        : value.length;
+
+    let begin = value.lastIndexOf('<div', markers[i]);
+    const span = value.lastIndexOf('<span', markers[i]);
+
+    if (span > begin) {
+      begin = span;
+    }
+
+    if (begin < start) {
+      begin = start;
+    }
+
+    if (i === 0) {
+      begin = Math.max(0, begin);
+    }
+
+    blocks.push(value.slice(begin, next));
     start = next;
   }
-  return out.filter((x) => x.trim());
+
+  return blocks.filter((block) => block.trim());
 }
 
 export function parseDorarHtml(html = '') {
@@ -107,47 +181,116 @@ export function parseDorarHtml(html = '') {
   const blocks = blocksFromHtml(html);
 
   for (const block of blocks) {
-    const infoStartMatch = block.match(/<div[^>]*class=["'][^"']*hadith-info[^"']*["'][^>]*>/i);
-    const infoStart = infoStartMatch ? block.indexOf(infoStartMatch[0]) : -1;
-    const textHtml = infoStart >= 0 ? block.slice(0, infoStart) : block;
+    const infoStartMatch = block.match(
+      /<div[^>]*class=["'][^"']*hadith-info[^"']*["'][^>]*>/i
+    );
+
+    const infoStart = infoStartMatch
+      ? block.indexOf(infoStartMatch[0])
+      : -1;
+
+    const textHtml =
+      infoStart >= 0
+        ? block.slice(0, infoStart)
+        : block;
 
     let text = stripTags(textHtml)
       .replace(/^\s*\d+\s*[-–—]\s*/, '')
       .replace(/خلاصة حكم المحدث\s*:.*$/s, '')
       .trim();
 
-    // في بعض النتائج القديمة تلتحق معلومات «الراوي/المحدث...» بالنص نفسه.
-    const labels = ['الراوي:', 'المحدث:', 'المصدر:', 'الصفحة أو الرقم:', 'خلاصة حكم المحدث:'];
-    const cut = labels.map((x) => text.indexOf(x)).filter((x) => x >= 0);
-    if (cut.length) text = text.slice(0, Math.min(...cut)).trim();
+    const labels = [
+      'الراوي:',
+      'المحدث:',
+      'المصدر:',
+      'الصفحة أو الرقم:',
+      'خلاصة حكم المحدث:',
+    ];
 
-    const truncated = /\.\s*\.\s*\./.test(text);
-    text = text.replace(/[\s.]+$/, '').trim();
+    const cuts = labels
+      .map((label) => text.indexOf(label))
+      .filter((index) => index >= 0);
 
-    const info = parseInfo(infoStart >= 0 ? block.slice(infoStart) : block);
-    if (text) results.push({ text, truncated, ...info, origin: 'dorar' });
+    if (cuts.length) {
+      text = text
+        .slice(0, Math.min(...cuts))
+        .trim();
+    }
+
+    const truncated = /\.{3}|…/.test(text);
+
+    text = text
+      .replace(/[\s.]+$/, '')
+      .trim();
+
+    const info = parseInfo(
+      infoStart >= 0
+        ? block.slice(infoStart)
+        : block
+    );
+
+    if (text) {
+      results.push({
+        text,
+        truncated,
+        ...info,
+        origin: 'dorar',
+      });
+    }
   }
 
   return results;
 }
 
 function payloadHtml(data) {
-  const a = data?.ahadith;
-  if (!a) return '';
-  if (typeof a === 'string') return a;
-  if (Array.isArray(a)) {
-    return a.map((item) => {
-      if (typeof item === 'string') return item;
-      return item?.th || item?.result || item?.html || '';
-    }).join('\n');
+  const ahadith = data?.ahadith;
+
+  if (!ahadith) {
+    return '';
   }
-  if (typeof a === 'object') {
-    if (typeof a.result === 'string') return a.result;
-    return Object.values(a).map((item) => {
-      if (typeof item === 'string') return item;
-      return item?.th || item?.result || item?.html || '';
-    }).join('\n');
+
+  if (typeof ahadith === 'string') {
+    return ahadith;
   }
+
+  if (Array.isArray(ahadith)) {
+    return ahadith
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+
+        return (
+          item?.th ||
+          item?.result ||
+          item?.html ||
+          ''
+        );
+      })
+      .join('\n');
+  }
+
+  if (typeof ahadith === 'object') {
+    if (typeof ahadith.result === 'string') {
+      return ahadith.result;
+    }
+
+    return Object.values(ahadith)
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        }
+
+        return (
+          item?.th ||
+          item?.result ||
+          item?.html ||
+          ''
+        );
+      })
+      .join('\n');
+  }
+
   return '';
 }
 
@@ -156,41 +299,102 @@ export function parseDorarData(data = {}) {
 }
 
 export function dorarSearchLink(query) {
-  return `https://dorar.net/hadith/search?q=${encodeURIComponent(query)}`;
+  return `https://dorar.net/hadith/search?q=${encodeURIComponent(
+    query
+  )}`;
 }
 
 export function dorarApiUrl(query) {
   return `${API}?skey=${encodeURIComponent(query)}`;
 }
 
-// يحوّل نص استجابة الدرر إلى نتائج. يتحمل BOM وغلاف JSONP.
+// تحليل استجابة نصية عند استخدامها من الخادم.
+// يدعم JSON العادي وغلاف JSONP.
 export function parseDorarResponse(raw = '') {
-  const text = String(raw).replace(/^\uFEFF/, '').trim();
-  const open = text.indexOf('(');
-  const jsonText = text.startsWith('{') ? text : (open >= 0 ? text.slice(open + 1, text.lastIndexOf(')')) : text);
+  const text = String(raw)
+    .replace(/^\uFEFF/, '')
+    .trim();
+
+  let jsonText = text;
+
+  if (!text.startsWith('{') && !text.startsWith('[')) {
+    const open = text.indexOf('(');
+    const close = text.lastIndexOf(')');
+
+    if (open >= 0 && close > open) {
+      jsonText = text.slice(open + 1, close);
+    }
+  }
+
   let data;
+
   try {
     data = JSON.parse(jsonText);
   } catch {
-    throw new Error(`Dorar returned non-JSON: ${text.slice(0, 120)}`);
+    throw new Error(
+      `Dorar returned non-JSON: ${text.slice(0, 120)}`
+    );
   }
+
   return parseDorarData(data);
 }
 
-export async function searchDorar(query, { fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+/*
+ * هذه الدالة للخادم فقط.
+ *
+ * ممنوع استخدامها مباشرة من المتصفح لأن dorar.net
+ * لا يرسل CORS headers للـ fetch العادي.
+ *
+ * المتصفح يستخدم JSONP من public/dorar-client.js.
+ */
+export async function searchDorar(
+  query,
+  {
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 12000,
+  } = {}
+) {
+  if (typeof window !== 'undefined') {
+    throw new Error(
+      'searchDorar is server-only; browser requests must use JSONP'
+    );
+  }
+
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('Fetch is unavailable');
+  }
+
+  const controller = new AbortController();
+
+  const timer = setTimeout(
+    () => controller.abort(),
+    timeoutMs
+  );
+
   try {
-    const headers = typeof window === 'undefined'
-      ? {
-          'User-Agent': 'Mozilla/5.0 (compatible; Tabayyun/1.0; +https://tabayyun-oats.onrender.com)',
-          Accept: 'application/json, text/javascript, */*;q=0.1',
+    const response = await fetchImpl(
+      dorarApiUrl(query),
+      {
+        signal: controller.signal,
+        headers: {
+          Accept:
+            'application/json, text/javascript, */*;q=0.1',
           'Accept-Language': 'ar,en;q=0.8',
-        }
-      : undefined;
-    const res = await fetchImpl(dorarApiUrl(query), { signal: ctrl.signal, headers });
-    if (!res.ok) throw new Error(`Dorar HTTP ${res.status}`);
-    return parseDorarResponse(await res.text());
+          'User-Agent':
+            'Mozilla/5.0 (compatible; Tabayyun/1.0)',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Dorar HTTP ${response.status}`
+      );
+    }
+
+    const raw = await response.text();
+
+    return parseDorarResponse(raw);
   } finally {
     clearTimeout(timer);
   }
