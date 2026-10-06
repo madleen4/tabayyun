@@ -1,81 +1,103 @@
-// الاتصال بالدرر من متصفح المستخدم.
-import { searchDorar, dorarApiUrl, parseDorarHtml } from '/lib/dorar.js';
+// الاتصال المباشر بالموسوعة الحديثية في الدرر السنية من متصفح المستخدم.
+// نبدأ بـ JSONP لأنها الطريقة التي توثقها الدرر لأصحاب المواقع، ثم نحاول الطرق الأخرى.
+// لا يوجد أي مصدر احتياطي يغيّر حكم الحديث إذا تعذّرت الدرر.
+import { searchDorar, dorarApiUrl, parseDorarData } from '/lib/dorar.js';
 
-function jsonp(query, timeoutMs = 8000) {
+function jsonp(query, timeoutMs = 9000) {
   return new Promise((resolve, reject) => {
-    // اسم من حروف فقط، لأن خدمة الدرر قد تحذف الرموز والأرقام من اسم الدالة.
-    const cb = 'tabayyun' + Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('');
+    // اسم من حروف فقط لتوافق أفضل مع خدمة JSONP القديمة.
+    const cb = 'tabayyun' + Array.from({ length: 10 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('');
     const script = document.createElement('script');
     let done = false;
-    const cleanup = () => { delete window[cb]; script.remove(); clearTimeout(timer); };
-    const timer = setTimeout(() => { if (!done) { cleanup(); reject(new Error('JSONP timeout')); } }, timeoutMs);
-    window[cb] = (data) => { done = true; cleanup(); resolve(parseDorarHtml(data?.ahadith?.result ?? '')); };
-    script.onerror = () => { if (!done) { cleanup(); reject(new Error('JSONP load error (blocked or failed to load)')); } };
-    // إن حُمّل الملف ولم يُستدعَ الرد، فالخدمة لا تدعم JSONP.
-    script.onload = () => setTimeout(() => { if (!done) { cleanup(); reject(new Error('JSONP not supported')); } }, 50);
+    let timer;
+
+    const cleanup = () => {
+      try { delete window[cb]; } catch { window[cb] = undefined; }
+      script.remove();
+      if (timer) clearTimeout(timer);
+    };
+
+    const fail = (message) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(new Error(message));
+    };
+
+    window[cb] = (data) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      try {
+        resolve(parseDorarData(data));
+      } catch (e) {
+        reject(e);
+      }
+    };
+
+    script.onerror = () => fail('Dorar JSONP load error');
+    timer = setTimeout(() => fail('Dorar JSONP timeout'), timeoutMs);
     script.src = `${dorarApiUrl(query)}&callback=${cb}`;
     document.head.append(script);
   });
 }
 
-// أربع طرق بالترتيب، وتُحفظ الطريقة الناجحة لبقية الجلسة:
-// 1) الدرر عبر خادم تبيَّن، 2) JSONP كما توثّقها الدرر (dorar.net/article/389)، 3) قراءة مباشرة،
-// 4) المصدر الاحتياطي: كتب السنة من مجموعة بيانات مفتوحة محفوظة في الخادم.
 async function viaServer(query) {
   const res = await fetch(`/api/dorar?q=${encodeURIComponent(query)}`);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `server ${res.status}`);
-  return data.results;
+  if (!res.ok) throw new Error(data.error || `Dorar server ${res.status}`);
+  return data.results || [];
 }
 
-async function viaLocal(query) {
-  const res = await fetch(`/api/local?q=${encodeURIComponent(query)}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `local ${res.status}`);
-  return data.results;
-}
+const ROUTES = {
+  jsonp: (q) => jsonp(q),
+  direct: (q) => searchDorar(q),
+  server: viaServer,
+};
 
-const ROUTES = { server: viaServer, jsonp: (q) => jsonp(q), direct: (q) => searchDorar(q), local: viaLocal };
-
-// تُحفظ الطريقة الناجحة 15 دقيقة، حتى لا تُجرَّب الطرق المرفوضة مع كل فتح للصفحة.
-const KEY = 'tabayyun-route';
+// نحفظ طريقة الدرر التي نجحت 15 دقيقة فقط لتقليل التأخير.
+const KEY = 'tabayyun-dorar-route';
 function remembered() {
   try {
     const { name, at } = JSON.parse(localStorage.getItem(KEY) || '{}');
-    // المصدر الاحتياطي لا يُحفظ، حتى تُجرَّب الدرر من جديد عند فتح الصفحة
-    return ROUTES[name] && name !== 'local' && Date.now() - at < 15 * 60_000 ? name : null;
-  } catch { return null; }
+    return ROUTES[name] && Date.now() - at < 15 * 60_000 ? name : null;
+  } catch {
+    return null;
+  }
 }
 function remember(name) {
-  try { localStorage.setItem(KEY, JSON.stringify({ name, at: Date.now() })); } catch { /* التخزين غير متاح */ }
+  try { localStorage.setItem(KEY, JSON.stringify({ name, at: Date.now() })); } catch { /* ignore */ }
 }
+
 let working = remembered();
-let localSince = 0; // متى انتقلت الأداة إلى المصدر الاحتياطي، لتعيد تجربة الدرر بعد دقيقتين
-let probing = null; // أول بحث يجرّب الطرق، والبقية تنتظر نتيجته بدل أن تجرّب كلها معاً
+let probing = null;
 
 export const activeRoute = () => working;
 
 async function tryRoutes(query) {
-  const order = working ? [working, ...Object.keys(ROUTES).filter((k) => k !== working)] : Object.keys(ROUTES);
+  const order = working
+    ? [working, ...Object.keys(ROUTES).filter((k) => k !== working)]
+    : Object.keys(ROUTES);
   const errors = [];
+
   for (const name of order) {
     try {
       const results = await ROUTES[name](query);
-      if (working !== name) console.info(`Dorar route: ${name}`);
-      if (name === 'local' && working !== 'local') localSince = Date.now();
       working = name;
-      if (name !== 'local') remember(name);
+      remember(name);
+      if (name !== order[0]) console.info(`Dorar route: ${name}`);
       return results;
     } catch (e) {
       errors.push(`${name}: ${e.message}`);
     }
   }
+
+  working = null;
   console.error('Dorar unreachable:', errors.join(' | '));
   throw new Error(errors.join(' | '));
 }
 
 export async function searchFromBrowser(query) {
-  if (working === 'local' && Date.now() - localSince > 2 * 60_000) working = null;
   if (!working && probing) await probing.catch(() => {});
   if (!working) {
     probing = tryRoutes(query);

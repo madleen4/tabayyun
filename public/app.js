@@ -517,13 +517,9 @@ $('analyze').addEventListener('click', async () => {
   }
 });
 
-// يوضح للمستخدم إن كانت النتائج من المصدر الاحتياطي لا من الدرر
+// لم يعد تبيَّن ينتقل إلى مصدر احتياطي غير مذكور في العرض؛ عند تعذر المصادر يمتنع عن الحكم.
 function showSourceNote() {
-  let n = document.getElementById('srcnote');
-  if (!n) { n = el('p', 'badge'); n.id = 'srcnote'; $('mode').after(n); }
-  const local = activeRoute() === 'local';
-  n.hidden = !local;
-  n.textContent = local ? 'تعذّر الوصول إلى الدرر السنية الآن، فالنتائج من المصدر الاحتياطي (الكتب الستة وموطأ مالك)، وقد لا تشمل كل أحكام المحدثين.' : '';
+  document.getElementById('srcnote')?.remove();
 }
 
 $('sample').addEventListener('click', () => { showReader(false); state.fileName = ''; textEl.value = SAMPLE; syncAnalyzeLabel(); });

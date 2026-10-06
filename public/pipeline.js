@@ -1,5 +1,6 @@
 // خط المعالجة في المتصفح: استخراج ← تحقق من الدرر ← حالة ← تحريف ← بدائل ← نص مصحح.
 import { searchFromBrowser, activeRoute } from '/dorar-client.js';
+import { searchHadeethEnc as searchHadeethEncDirect } from '/lib/hadeethenc.js';
 import { pickMatches, alignDiff, similarity, MATCH_THRESHOLD } from '/lib/match.js';
 import { decideStatus, classifyRuling } from '/lib/classify.js';
 import { normalizeArabic } from '/lib/normalize.js';
@@ -9,8 +10,8 @@ export { hasArabic, excerpt, buildCorrected, activeRoute };
 export { FULL_MAX } from '/lib/text-ops.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// مهلة بين طلبات الدرر احتراماً للخدمة؛ لا حاجة لها مع المصدر المحلي
-const pause = () => (activeRoute() === 'local' ? Promise.resolve() : sleep(300));
+// مهلة قصيرة بين طلبات المصادر احتراماً للخدمات الخارجية.
+const pause = () => sleep(300);
 
 async function post(path, body) {
   const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -21,6 +22,22 @@ async function post(path, body) {
 
 export async function getConfig() {
   try { return await (await fetch('/api/config')).json(); } catch { return { ai: false }; }
+}
+
+async function searchHadeethEncAny(query) {
+  // نبدأ عبر خادم تبيَّن، وإن تعذّر نجرب API الرسمي مباشرة من المتصفح.
+  try {
+    const res = await fetch(`/api/hadeethenc?q=${encodeURIComponent(query)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HadeethEnc server ${res.status}`);
+    return data.results || [];
+  } catch (serverErr) {
+    try {
+      return await searchHadeethEncDirect(query);
+    } catch {
+      throw serverErr;
+    }
+  }
 }
 
 // استعلامات بحث متدرجة: النص كاملاً، ثم نصفاه (لالتقاط المحرّف الذي لا يجده البحث الحرفي).
@@ -39,38 +56,74 @@ function searchQueries(quote) {
 export async function checkHadith(quote) {
   let all = [];
   let pick = { best: null, matched: [] };
-  let failed = 0;
   const queries = searchQueries(quote);
+  let dorarSuccess = false;
+  let hadeethEncSuccess = false;
+
   for (const q of queries) {
-    try {
-      const res = await searchFromBrowser(q);
-      all = all.concat(res);
-      pick = pickMatches(quote, all);
-      if (pick.best && pick.best.score >= 0.85) break;
-    } catch (e) {
-      failed++;
+    const [dorar, hadeethenc] = await Promise.allSettled([
+      searchFromBrowser(q),
+      searchHadeethEncAny(q),
+    ]);
+
+    if (dorar.status === 'fulfilled') {
+      dorarSuccess = true;
+      all = all.concat(dorar.value || []);
     }
+    if (hadeethenc.status === 'fulfilled') {
+      hadeethEncSuccess = true;
+      all = all.concat(hadeethenc.value || []);
+    }
+
+    pick = pickMatches(quote, all);
+    if (pick.best && pick.best.score >= 0.85) break;
     await pause();
   }
-  if (failed === queries.length) {
-    return { status: 'تعذّر التحقق', note: 'تعذّر الوصول إلى الموسوعة الحديثية، فلم يتم الحكم.', judged: [], diff: null };
+
+  if (!dorarSuccess && !hadeethEncSuccess) {
+    return {
+      status: 'تعذّر التحقق',
+      note: 'تعذّر الوصول إلى الدرر السنية وموسوعة الأحاديث النبوية، فلم يتم الحكم.',
+      judged: [],
+      diff: null,
+    };
   }
+
   if (!pick.best) {
-    return { status: 'لم يُعثر عليه', note: 'لم تجد الأداة أصلاً مطابقاً بثقة كافية. هذا لا يعني أنه مكذوب.', judged: [], diff: null };
+    // إذا كانت الدرر متاحة فعدم وجود مطابقة يعني امتناعاً عادياً.
+    if (dorarSuccess) {
+      return {
+        status: 'لم يُعثر عليه',
+        note: 'لم تجد الأداة أصلاً مطابقاً بثقة كافية. هذا لا يعني أنه مكذوب.',
+        judged: [],
+        diff: null,
+      };
+    }
+    // HadeethEnc يضم الأحاديث الثابتة؛ غياب النتيجة فيه لا يكفي للحكم على الضعيف/الموضوع.
+    return {
+      status: 'تعذّر التحقق',
+      note: 'لم يُعثر عليه في HadeethEnc، وتعذّر الوصول إلى الدرر السنية؛ لذلك لم تُصدر الأداة حكماً.',
+      judged: [],
+      diff: null,
+    };
   }
-  // إزالة التكرار (النتائج نفسها قد تعود من أكثر من استعلام)
+
+  // إزالة التكرار مع الإبقاء على أحكام المصادر المختلفة.
   const seen = new Set();
   const matched = pick.matched.filter((m) => {
-    const k = `${m.muhaddith}|${m.source}|${m.number}|${normalizeArabic(m.text).slice(0, 40)}`;
+    const k = `${m.origin || ''}|${m.muhaddith}|${m.source}|${m.number}|${m.ruling}|${normalizeArabic(m.text).slice(0, 50)}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
   });
+
   const decision = decideStatus(matched);
-  // للمقارنة اللفظية: الرواية الثابتة الأقرب للفظ المستخدم (أقل كلمات مخالفة)، وإلا أقرب نتيجة مطلقاً.
-  // فلا يُعدّ اللفظ محرّفاً إن وافق إحدى الروايات الثابتة.
-  const sound = decision.judged.filter((j) => j.cat === 'ثابت').slice(0, 12);
-  const pool = sound.length ? sound : decision.judged.slice(0, 1);
+
+  // للمقارنة اللفظية نفضّل الرواية الثابتة من HadeethEnc، ثم أي رواية ثابتة أخرى.
+  const stable = decision.judged.filter((j) => j.cat === 'ثابت');
+  const hadeethRefs = stable.filter((j) => j.origin === 'hadeethenc');
+  const pool = (hadeethRefs.length ? hadeethRefs : stable.length ? stable : decision.judged.slice(0, 1)).slice(0, 12);
+
   let diff = null;
   for (const ref of pool) {
     const d = { ...alignDiff(quote, ref.text), ref };
@@ -78,7 +131,20 @@ export async function checkHadith(quote) {
     if (!diff || bad < diff.bad) diff = { ...d, bad };
     if (!bad) break;
   }
-  return { ...decision, diff, full: fullSource(quote, diff?.ref), score: pick.best.score };
+
+  let note = decision.note;
+  if (!dorarSuccess && decision.status === 'ثابت') {
+    note = [note, 'ثبت في موسوعة الأحاديث النبوية (HadeethEnc)، وتعذّر جلب أحكام الدرر الإضافية حالياً.']
+      .filter(Boolean).join(' ');
+  }
+
+  return {
+    ...decision,
+    note,
+    diff,
+    full: fullSource(quote, diff?.ref),
+    score: pick.best.score,
+  };
 }
 
 
@@ -158,28 +224,35 @@ export async function analyzeText(text, { onProgress = () => {}, onExtracted = (
 }
 
 
-// بدائل ثابتة: النموذج يقترح كلمات بحث فقط، والنصوص تأتي من الدرر بأحكامها.
+// بدائل ثابتة: النموذج يقترح كلمات بحث فقط، والنصوص تأتي من HadeethEnc.
 export async function findAlternatives(quote) {
   const { queries } = await post('/api/alt-queries', { quote });
   const found = [];
   const seen = new Set();
+
+  // البدائل تأتي من HadeethEnc فقط؛ النموذج لا يكتب حديثاً، بل يقترح كلمات البحث.
   for (const q of queries) {
     let res = [];
-    try { res = await searchFromBrowser(q); } catch { continue; }
+    try { res = await searchHadeethEncAny(q); } catch { continue; }
+
     for (const r of res) {
       const c = classifyRuling(r.ruling, r.source);
       if (c.cat !== 'ثابت' || c.level !== 'matn') continue;
       if (similarity(quote, r.text).score >= MATCH_THRESHOLD) continue;
+
       const part = excerpt(r.text, q);
-      if (plain(part).length > MAX_ALT * 1.6) continue; // طويل جداً ولم يُعثر فيه على الموضع
+      if (plain(part).length > MAX_ALT * 1.6) continue;
       const k = normalizeArabic(part).slice(0, 60);
       if (seen.has(k) || found.some((f) => similarity(f.text, part).score >= 0.8)) continue;
+
       seen.add(k);
       found.push({ ...r, text: part, partial: part !== r.text });
     }
+
     if (found.length >= 3) break;
     await pause();
   }
+
   return found.slice(0, 3);
 }
 

@@ -1,7 +1,7 @@
 // خادم تبيَّن: بلا مكتبات خارجية (Node 18 أو أحدث).
 // - يقدّم الواجهة.
 // - يستدعي النموذج اللغوي (المفتاح يبقى في الخادم).
-// - البحث في الدرر (من الخادم أو المتصفح)، ومصدر احتياطي محلي لكتب السنة إن تعذّرت الدرر.
+// - البحث في الدرر السنية، واستخدام HadeethEnc للأحاديث الثابتة والبدائل.
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { readFileSync, existsSync } from 'node:fs';
@@ -11,8 +11,7 @@ import { extractWithAI, altQueriesWithAI, rephraseWithAI, baselineWithAI, ocrWit
 import { extractByRules } from './src/extract-rules.js';
 import { words } from './src/normalize.js';
 import { searchDorar } from './src/dorar.js';
-import { searchLocal, searchWidespread, load as loadLocal, status as localStatus } from './src/localdb.js';
-import { ALT_HINTS } from './src/widespread.js';
+import { searchHadeethEnc } from './src/hadeethenc.js';
 
 // قراءة ملف .env إن وُجد (دون مكتبات)
 const ENV = fileURLToPath(new URL('./.env', import.meta.url));
@@ -30,7 +29,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const MAX_TEXT = 8000;        // لكل طلب استخراج؛ النص الطويل يُقسَّم في المتصفح إلى أجزاء
 const MAX_REPHRASE = 40000;
 
-// إذا رفضت الدرر الطلبات، لا يُعاد طلبها من الخادم لمدة 15 دقيقة (يذهب المتصفح للمصدر الاحتياطي فوراً).
+// إذا رفضت الدرر الطلبات من الخادم، لا نكررها لمدة 15 دقيقة؛ المتصفح يظل يجرب JSONP مباشرة.
 let dorarBlockedUntil = 0;
 // إذا تعذّر النموذج اللغوي (ازدحام أو نفاد حصة)، يُستخدم الاستخراج بالقواعد دقيقة واحدة بدل الانتظار في كل طلب.
 let aiPausedUntil = 0;
@@ -88,7 +87,7 @@ const logErr = (where, err) => console.error(`${where}:`, err.name, '-', err.mes
 
 const api = {
   async config() {
-    return { ai: hasKey(), local: localStatus };
+    return { ai: hasKey() };
   },
 
   async extract(body) {
@@ -116,17 +115,15 @@ const api = {
   async 'alt-queries'(body) {
     const quote = String(body.quote || '').slice(0, 600);
     if (!quote) return [400, { error: 'لا يوجد نص.' }];
-    // إن كان القول من الأقوال المنتشرة المعروفة، تُضاف عبارات بحث مجهزة لبدائلها
-    const hints = ALT_HINTS[searchWidespread(quote)[0]?.text] || [];
     try {
       if (Date.now() < aiPausedUntil) throw new Error('AI_PAUSED');
       const ai = await altQueriesWithAI(quote);
-      return [200, { engine: 'ai', queries: [...new Set([...hints, ...ai])] }];
+      return [200, { engine: 'ai', queries: [...new Set(ai)] }];
     } catch (err) {
       if (err.message !== 'NO_KEY' && err.message !== 'AI_PAUSED') { logErr('alt', err); aiPausedUntil = Date.now() + 30_000; }
-      // احتياطي: العبارات المجهزة، ثم أطول كلمتين في النص
+      // عند تعذّر النموذج: أطول كلمتين من القول لتكوين عبارة بحث فقط.
       const w = words(quote).filter((x) => x.length > 2).sort((a, b) => b.length - a.length);
-      return [200, { engine: 'rules', queries: [...hints, ...(w.length >= 2 ? [`${w[0]} ${w[1]}`] : w.slice(0, 1))] }];
+      return [200, { engine: 'rules', queries: w.length >= 2 ? [`${w[0]} ${w[1]}`] : w.slice(0, 1) }];
     }
   },
 
@@ -189,20 +186,20 @@ const server = http.createServer(async (req, res) => {
         logErr('dorar', err);
         if (/403|abort/i.test(err.message + err.name)) {
           dorarBlockedUntil = Date.now() + 15 * 60_000;
-          console.error('Dorar refused; using the local source for 15 minutes.');
+          console.error('Dorar refused server-side requests for 15 minutes; browser JSONP will still be tried.');
         }
         return sendJson(res, 502, { error: err.message });
       }
     }
-    if (name === 'local' && req.method === 'GET') {
-      // المصدر الاحتياطي: كتب السنة من مجموعة بيانات مفتوحة محفوظة محلياً
+    if (name === 'hadeethenc' && req.method === 'GET') {
+      // HadeethEnc: المصدر المعتمد في تبيَّن للأحاديث الثابتة والمطابقة والبدائل.
       const q = (url.searchParams.get('q') || '').trim().slice(0, 300);
       if (!q) return sendJson(res, 400, { error: 'لا يوجد نص.' });
       try {
-        return sendJson(res, 200, { results: await searchLocal(q) });
+        return sendJson(res, 200, { results: await searchHadeethEnc(q) });
       } catch (err) {
-        logErr('local', err);
-        return sendJson(res, 503, { error: 'المصدر الاحتياطي غير جاهز.' });
+        logErr('hadeethenc', err);
+        return sendJson(res, 502, { error: 'تعذّر الوصول إلى موسوعة الأحاديث النبوية.' });
       }
     }
     if (req.method !== 'POST' || !api[name] || name === 'config') return sendJson(res, 404, { error: 'غير موجود' });
@@ -228,6 +225,4 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Tabayyun running on http://localhost:${PORT} (AI: ${hasKey() ? 'on' : 'off'})`);
-  // تجهيز المصدر الاحتياطي في الخلفية (أول مرة يُنزَّل ثم يُحفظ في data/cache)
-  loadLocal().catch((e) => console.error('local data:', e.message));
 });
