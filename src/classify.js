@@ -57,10 +57,13 @@ export function decideStatus(matched = []) {
     const note = fab.length || weak.length ? 'بعض أسانيده ضُعّفت، والحديث ثابت من طرق أخرى بحسب الأحكام المعروضة.' : '';
     return { status: 'ثابت', note, judged };
   }
-  if (fab.length && fab.length >= weak.length) {
-    const note = weak.length ? 'ومن المحدِّثين من اكتفى بتضعيفه.' : '';
-    return { status: 'موضوع', note, judged };
+  // اختلاف المحدثين بين التضعيف والحكم بالوضع اختلاف معتبر في حالة المشروع؛
+  // نعرض الأحكام كلها ولا نرجّح بينها من عندنا.
+  if (fab.length && weak.length) {
+    return { status: 'مختلف فيه', note: 'اختلفت أحكام المحدِّثين بين التضعيف والحكم بالوضع/البطلان، فتُعرض كلها دون ترجيح.', judged };
   }
-  const note = fab.length ? 'ومن المحدِّثين من حكم بوضعه.' : '';
-  return { status: 'ضعيف', note, judged };
+  if (fab.length) {
+    return { status: 'موضوع', note: '', judged };
+  }
+  return { status: 'ضعيف', note: '', judged };
 }

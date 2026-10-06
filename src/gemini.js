@@ -130,7 +130,7 @@ ${text}
 
 // يعيد مواضع الأقوال داخل النص الأصلي، ويستبعد أي قول لا يوجد حرفياً في النص.
 export async function extractWithAI(text, opts) {
-  const out = await generate(EXTRACT_PROMPT(text), { budgetMs: 15000, ...opts });
+  const out = await generate(EXTRACT_PROMPT(text), { budgetMs: 40000, timeoutMs: 30000, ...opts });
   const items = [];
   let rejected = 0;
   let cursor = 0;

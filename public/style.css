@@ -199,7 +199,7 @@ details[open] > summary::before { content: '−'; }
 .rulings li { display: grid; gap: 2px; padding: 10px 0; border-bottom: 1px dashed var(--border); }
 .rulings li:last-child { border-bottom: 0; }
 .rtext { font-family: var(--naskh); font-size: 18px; }
-.rruling { font-size: 15px; font-weight: 700; color: var(--c, var(--text)); }
+.rruling { font-size: 15px; font-weight: 700; color: var(--text-2); }
 
 /* ---------- النص النهائي ---------- */
 .final { margin-top: 24px; }

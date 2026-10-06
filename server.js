@@ -94,22 +94,16 @@ const api = {
     const text = String(body.text || '');
     if (!text.trim()) return [400, { error: 'النص فارغ.' }];
     if (text.length > MAX_TEXT) return [400, { error: `النص أطول من ${MAX_TEXT} حرف.` }];
-    let engine = 'ai';
-    let items = [];
-    let rejected = 0;
     try {
-      if (Date.now() < aiPausedUntil) throw new Error('AI_PAUSED');
-      ({ items, rejected } = await extractWithAI(text));
+      const { items, rejected } = await extractWithAI(text);
+      return [200, { engine: 'ai', items, rejected }];
     } catch (err) {
-      if (err.message !== 'NO_KEY' && err.message !== 'AI_PAUSED') {
-        logErr('extract', err);
-        aiPausedUntil = Date.now() + 30_000;
-        console.error('AI paused for 30s; using rules extractor.');
+      if (err.message === 'NO_KEY') {
+        return [503, { error: 'استخراج الأحاديث يحتاج مفتاح Gemini.' }];
       }
-      engine = 'rules';
-      items = extractByRules(text);
+      logErr('extract', err);
+      return [502, { error: 'تعذّر تحليل النص بالذكاء الاصطناعي الآن. أعد المحاولة.' }];
     }
-    return [200, { engine, items, rejected }];
   },
 
   async 'alt-queries'(body) {

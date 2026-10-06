@@ -54,61 +54,89 @@ function searchQueries(quote) {
 
 // يتحقق من حديث واحد. يعيد الحالة والأحكام ونتيجة كشف التحريف.
 export async function checkHadith(quote) {
-  let all = [];
-  let pick = { best: null, matched: [] };
   const queries = searchQueries(quote);
-  let dorarSuccess = false;
+
+  // 1) حسب فلو تبيّن: نبحث أولاً في HadeethEnc لأنه مصدر الأحاديث الثابتة.
   let hadeethEncSuccess = false;
+  let hadeethAll = [];
 
   for (const q of queries) {
-    const [dorar, hadeethenc] = await Promise.allSettled([
-      searchFromBrowser(q),
-      searchHadeethEncAny(q),
-    ]);
-
-    if (dorar.status === 'fulfilled') {
-      dorarSuccess = true;
-      all = all.concat(dorar.value || []);
-    }
-    if (hadeethenc.status === 'fulfilled') {
+    try {
+      const results = await searchHadeethEncAny(q);
       hadeethEncSuccess = true;
-      all = all.concat(hadeethenc.value || []);
-    }
+      hadeethAll = hadeethAll.concat(results || []);
 
-    pick = pickMatches(quote, all);
-    if (pick.best && pick.best.score >= 0.85) break;
+      const pick = pickMatches(quote, hadeethAll);
+      if (pick.best) {
+        const seen = new Set();
+        const matched = pick.matched.filter((m) => {
+          const k = `${m.origin || ''}|${m.source}|${m.number}|${m.ruling}|${normalizeArabic(m.text).slice(0, 50)}`;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+
+        const decision = decideStatus(matched);
+        const stable = decision.judged.filter((j) => j.cat === 'ثابت');
+        const ref = stable[0] || decision.judged[0];
+        const d = ref ? { ...alignDiff(quote, ref.text), ref } : null;
+        const diff = d ? { ...d, bad: d.userWords.filter((w) => !w.ok).length } : null;
+
+        return {
+          ...decision,
+          status: 'ثابت',
+          note: decision.note || 'ثابت في موسوعة الأحاديث النبوية (HadeethEnc).',
+          diff,
+          full: fullSource(quote, diff?.ref),
+          score: pick.best.score,
+        };
+      }
+    } catch {
+      // نكمل بقية استعلامات HadeethEnc؛ الفشل التقني لا يعني أن الحديث غير ثابت.
+    }
     await pause();
   }
 
-  if (!dorarSuccess && !hadeethEncSuccess) {
-    return {
-      status: 'تعذّر التحقق',
-      note: 'تعذّر الوصول إلى الدرر السنية وموسوعة الأحاديث النبوية، فلم يتم الحكم.',
-      judged: [],
-      diff: null,
-    };
-  }
+  // 2) إذا لم نجد أصلاً ثابتاً في HadeethEnc ننتقل إلى محتوى الدرر السنية
+  // عبر API الباحث الحديثي، وننقل أحكام المحدّثين دون ترجيح من الأداة.
+  let dorarSuccess = false;
+  let dorarAll = [];
 
-  if (!pick.best) {
-    // إذا كانت الدرر متاحة فعدم وجود مطابقة يعني امتناعاً عادياً.
-    if (dorarSuccess) {
-      return {
-        status: 'لم يُعثر عليه',
-        note: 'لم تجد الأداة أصلاً مطابقاً بثقة كافية. هذا لا يعني أنه مكذوب.',
-        judged: [],
-        diff: null,
-      };
+  for (const q of queries) {
+    try {
+      const results = await searchFromBrowser(q);
+      dorarSuccess = true;
+      dorarAll = dorarAll.concat(results || []);
+
+      const pick = pickMatches(quote, dorarAll);
+      if (pick.best && pick.best.score >= 0.85) break;
+    } catch {
+      // نجرب بقية الاستعلامات قبل إعلان تعذر الوصول.
     }
-    // HadeethEnc يضم الأحاديث الثابتة؛ غياب النتيجة فيه لا يكفي للحكم على الضعيف/الموضوع.
+    await pause();
+  }
+
+  if (!dorarSuccess) {
     return {
       status: 'تعذّر التحقق',
-      note: 'لم يُعثر عليه في HadeethEnc، وتعذّر الوصول إلى الدرر السنية؛ لذلك لم تُصدر الأداة حكماً.',
+      note: hadeethEncSuccess
+        ? 'لم يُعثر على أصل ثابت في HadeethEnc، وتعذّر الوصول إلى أحكام الدرر السنية الآن.'
+        : 'تعذّر الوصول إلى HadeethEnc وإلى أحكام الدرر السنية الآن.',
       judged: [],
       diff: null,
     };
   }
 
-  // إزالة التكرار مع الإبقاء على أحكام المصادر المختلفة.
+  const pick = pickMatches(quote, dorarAll);
+  if (!pick.best) {
+    return {
+      status: 'لم يُعثر عليه',
+      note: 'لم تجد الأداة أصلاً مطابقاً بثقة كافية في المصادر المتاحة. هذا لا يعني أنه مكذوب.',
+      judged: [],
+      diff: null,
+    };
+  }
+
   const seen = new Set();
   const matched = pick.matched.filter((m) => {
     const k = `${m.origin || ''}|${m.muhaddith}|${m.source}|${m.number}|${m.ruling}|${normalizeArabic(m.text).slice(0, 50)}`;
@@ -118,29 +146,12 @@ export async function checkHadith(quote) {
   });
 
   const decision = decideStatus(matched);
-
-  // للمقارنة اللفظية نفضّل الرواية الثابتة من HadeethEnc، ثم أي رواية ثابتة أخرى.
-  const stable = decision.judged.filter((j) => j.cat === 'ثابت');
-  const hadeethRefs = stable.filter((j) => j.origin === 'hadeethenc');
-  const pool = (hadeethRefs.length ? hadeethRefs : stable.length ? stable : decision.judged.slice(0, 1)).slice(0, 12);
-
-  let diff = null;
-  for (const ref of pool) {
-    const d = { ...alignDiff(quote, ref.text), ref };
-    const bad = d.userWords.filter((w) => !w.ok).length;
-    if (!diff || bad < diff.bad) diff = { ...d, bad };
-    if (!bad) break;
-  }
-
-  let note = decision.note;
-  if (!dorarSuccess && decision.status === 'ثابت') {
-    note = [note, 'ثبت في موسوعة الأحاديث النبوية (HadeethEnc)، وتعذّر جلب أحكام الدرر الإضافية حالياً.']
-      .filter(Boolean).join(' ');
-  }
+  const ref = decision.judged[0];
+  const d = ref ? { ...alignDiff(quote, ref.text), ref } : null;
+  const diff = d ? { ...d, bad: d.userWords.filter((w) => !w.ok).length } : null;
 
   return {
     ...decision,
-    note,
     diff,
     full: fullSource(quote, diff?.ref),
     score: pick.best.score,

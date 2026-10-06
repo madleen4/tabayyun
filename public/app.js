@@ -30,7 +30,7 @@ const STATUS_META = {
   'ثابت': { meaning: 'صححه المحدثون أو حسّنوه، فيصح الاستشهاد به.' },
   'ضعيف': { meaning: 'ضعّفه المحدثون، فلا يُجزم بنسبته إلى النبي ﷺ.' },
   'موضوع': { meaning: 'حكموا بأنه مكذوب أو لا أصل له، فلا يُنشر منسوباً إلى النبي ﷺ.' },
-  'مختلف فيه': { meaning: 'تعارضت أحكام المحدثين، وهي معروضة أدناه كما وردت.' },
+  'مختلف فيه': { meaning: 'اختلفت أحكام المحدثين، وتُعرض دون ترجيح.' },
   'لم يُعثر عليه': { meaning: 'لم يُوجد أصل مطابق بثقة كافية، وهذا لا يعني أنه مكذوب.' },
   'تعذّر التحقق': { meaning: 'تعذّر الوصول إلى المصادر الآن، فلم يُحكم عليه.' },
 };
@@ -156,14 +156,14 @@ function rulingsBlock(judged) {
     const li = el('li');
     li.append(el('span', 'rtext', `«${j.text}»`));
     li.append(el('span', 'rmeta', [j.muhaddith, j.source, j.number].filter(Boolean).join('، ')));
-    if (j.ruling) li.append(el('span', `rruling ${j.cat ? STATUS_CLASS[j.cat] : ''}`, j.ruling));
+    if (j.ruling) li.append(el('span', 'rruling', j.ruling));
     ul.append(li);
   }
   d.append(ul);
   return d;
 }
 
-function diffBox(diff) {
+function diffBox(diff, fullSourceText = '') {
   const box = el('div', 'box warn');
   box.append(el('h3', '', 'لفظك يختلف عن لفظ المصدر'));
   const user = el('p', 'line');
@@ -175,7 +175,7 @@ function diffBox(diff) {
   });
   user.append(uw);
   const src = el('p', 'line');
-  src.append(el('span', 'label', 'في المصدر'), el('span', 'words src', diff.sourceWindow));
+  src.append(el('span', 'label', 'في المصدر'), el('span', 'words src', fullSourceText || diff.sourceWindow));
   box.append(user, src);
   return box;
 }
@@ -229,7 +229,7 @@ function renderItem(it, idx) {
   card.append(entryHead(it.status, idx));
   if (meta.meaning) card.append(el('p', 'meaning', meta.meaning));
   card.append(el('p', 'quote', `«${it.quote}»`));
-  if (it.note && it.note !== meta.meaning) card.append(el('p', 'note', it.note));
+  if (it.note && it.note !== meta.meaning && it.status !== 'مختلف فيه') card.append(el('p', 'note', it.note));
 
   const opts = el('div', 'opts');
   const name = `c${idx}`;
@@ -238,7 +238,7 @@ function renderItem(it, idx) {
 
   // استبدال واحد بلفظ المصدر: الحديث كاملاً إن كان المستخدم اقتبس جزءاً منه (وما لم يطل جداً)
   const distorted = it.diff?.distorted && it.diff.sourceWindow && it.status !== 'لم يُعثر عليه';
-  if (distorted) card.append(diffBox(it.diff));
+  if (distorted) card.append(diffBox(it.diff, it.full?.text || ''));
   if (distorted || (it.full && it.full.text.length <= FULL_MAX && it.status !== 'لم يُعثر عليه')) {
     opts.append(option(name, 'استبدال بلفظ المصدر', false, set({ mode: 'source' }), null, 'swap'));
   }
@@ -271,7 +271,7 @@ function renderItem(it, idx) {
     opts.append(btn);
   }
 
-  if (opts.children.length) card.append(el('p', 'choose', 'ماذا تريد أن تفعل بهذا الحديث؟ (اضغط الخيار مرة أخرى لإلغائه)'), opts);
+  if (opts.children.length) card.append(el('p', 'choose', 'الإجراء المقترح'), opts);
   if (it.judged?.length) card.append(rulingsBlock(it.judged));
   return li;
 }
