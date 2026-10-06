@@ -126,7 +126,7 @@ export function searchWidespread(query) {
     .concat(searchKnown(query));
 }
 
-// أقوال مشهورة خارج الكتب التسعة: نتيجة لكل حكم، منسوبة إلى قائله وكتابه.
+// أقوال مشهورة خارج الكتب الستة والموطأ: نتيجة لكل حكم، منسوبة إلى قائله وكتابه.
 export function searchKnown(query) {
   const qn = tokenize(query).tokens.length;
   return KNOWN

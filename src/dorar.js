@@ -89,7 +89,11 @@ export async function searchDorar(query, { fetchImpl = globalThis.fetch, timeout
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(dorarApiUrl(query), { signal: ctrl.signal });
+    // من الخادم فقط: تعريف صريح بالأداة (المتصفح لا يسمح بتغيير هذه الترويسات، وقد تستدعي طلباً تمهيدياً)
+    const headers = typeof window === 'undefined'
+      ? { 'User-Agent': 'Mozilla/5.0 (compatible; Tabayyun/1.0; +https://tabayyun.onrender.com)', Accept: 'application/json, text/javascript, */*;q=0.1', 'Accept-Language': 'ar,en;q=0.8' }
+      : undefined;
+    const res = await fetchImpl(dorarApiUrl(query), { signal: ctrl.signal, headers });
     if (!res.ok) throw new Error(`Dorar HTTP ${res.status}`);
     return parseDorarResponse(await res.text());
   } finally {

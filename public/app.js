@@ -524,7 +524,7 @@ function showSourceNote() {
   if (!n) { n = el('p', 'badge'); n.id = 'srcnote'; $('mode').after(n); }
   const local = activeRoute() === 'local';
   n.hidden = !local;
-  n.textContent = local ? 'تعذّر الوصول إلى الدرر السنية الآن، فالنتائج من المصدر الاحتياطي (تسعة كتب من كتب السنة)، وقد لا تشمل كل أحكام المحدثين.' : '';
+  n.textContent = local ? 'تعذّر الوصول إلى الدرر السنية الآن، فالنتائج من المصدر الاحتياطي (الكتب الستة وموطأ مالك)، وقد لا تشمل كل أحكام المحدثين.' : '';
 }
 
 $('sample').addEventListener('click', () => { showReader(false); state.fileName = ''; textEl.value = SAMPLE; syncAnalyzeLabel(); });

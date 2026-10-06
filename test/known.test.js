@@ -1,4 +1,4 @@
-// الأقوال المشهورة خارج الكتب التسعة، والاستخراج بالقواعد.
+// الأقوال المشهورة خارج الكتب الستة والموطأ، والاستخراج بالقواعد.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchKnown } from '../src/localdb.js';
@@ -7,7 +7,7 @@ import { extractByRules } from '../src/extract-rules.js';
 
 const status = (q) => decideStatus(searchKnown(q)).status;
 
-test('أقوال مشهورة خارج الكتب التسعة: الحكم منسوب إلى قائله', () => {
+test('أقوال مشهورة خارج الكتب الستة والموطأ: الحكم منسوب إلى قائله', () => {
   assert.equal(status('اختلاف أمتي رحمة'), 'موضوع');
   assert.equal(status('صوموا تصحوا'), 'ضعيف');
   assert.equal(status('أنا مدينة العلم وعلي بابها'), 'موضوع');
