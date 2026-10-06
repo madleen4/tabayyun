@@ -1,0 +1,16 @@
+{
+  "name": "tabayyun",
+  "version": "1.0.0",
+  "description": "تبيَّن: أداة تفحص الأحاديث في النص قبل نشره، مع المصدر وحكم المحدِّثين",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "check-ai": "node scripts/check-ai.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
