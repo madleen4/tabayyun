@@ -1,7 +1,7 @@
 // الاتصال بالدرر من متصفح المستخدم.
 import { searchDorar, dorarApiUrl, parseDorarHtml } from '/lib/dorar.js';
 
-function jsonp(query, timeoutMs = 4000) {
+function jsonp(query, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
     // اسم من حروف فقط، لأن خدمة الدرر قد تحذف الرموز والأرقام من اسم الدالة.
     const cb = 'tabayyun' + Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('');
@@ -42,13 +42,15 @@ const KEY = 'tabayyun-route';
 function remembered() {
   try {
     const { name, at } = JSON.parse(localStorage.getItem(KEY) || '{}');
-    return ROUTES[name] && Date.now() - at < 15 * 60_000 ? name : null;
+    // المصدر الاحتياطي لا يُحفظ، حتى تُجرَّب الدرر من جديد عند فتح الصفحة
+    return ROUTES[name] && name !== 'local' && Date.now() - at < 15 * 60_000 ? name : null;
   } catch { return null; }
 }
 function remember(name) {
   try { localStorage.setItem(KEY, JSON.stringify({ name, at: Date.now() })); } catch { /* التخزين غير متاح */ }
 }
 let working = remembered();
+let localSince = 0; // متى انتقلت الأداة إلى المصدر الاحتياطي، لتعيد تجربة الدرر بعد دقيقتين
 let probing = null; // أول بحث يجرّب الطرق، والبقية تنتظر نتيجته بدل أن تجرّب كلها معاً
 
 export const activeRoute = () => working;
@@ -60,8 +62,9 @@ async function tryRoutes(query) {
     try {
       const results = await ROUTES[name](query);
       if (working !== name) console.info(`Dorar route: ${name}`);
+      if (name === 'local' && working !== 'local') localSince = Date.now();
       working = name;
-      remember(name);
+      if (name !== 'local') remember(name);
       return results;
     } catch (e) {
       errors.push(`${name}: ${e.message}`);
@@ -72,6 +75,7 @@ async function tryRoutes(query) {
 }
 
 export async function searchFromBrowser(query) {
+  if (working === 'local' && Date.now() - localSince > 2 * 60_000) working = null;
   if (!working && probing) await probing.catch(() => {});
   if (!working) {
     probing = tryRoutes(query);

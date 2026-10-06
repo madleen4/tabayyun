@@ -1,5 +1,5 @@
 // واجهة تبين. كل نص يُعرض عبر textContent (لا innerHTML) لمنع حقن الشيفرة.
-import { analyzeText, checkHadith, findAlternatives, buildCorrected, rephrase, getConfig, hasArabic } from '/pipeline.js';
+import { analyzeText, checkHadith, findAlternatives, buildCorrected, rephrase, getConfig, hasArabic, FULL_MAX, activeRoute } from '/pipeline.js';
 import { readUploadedFile } from '/upload.js';
 import { makeDocx, download } from '/docx.js';
 
@@ -180,6 +180,14 @@ function diffBox(diff) {
   return box;
 }
 
+function fullBox(full) {
+  const box = el('div', 'box');
+  box.append(el('h3', '', 'الحديث كاملاً في المصدر'));
+  box.append(el('p', 'words src', `«${full.text}»`));
+  box.append(el('p', 'rmeta', [full.muhaddith, full.source, full.number, full.ruling].filter(Boolean).join('، ')));
+  return box;
+}
+
 function option(name, label, checked, onChange, extra, iconName = 'check', labelClass = '') {
   const l = el('label', 'opt');
   const r = document.createElement('input');
@@ -228,6 +236,11 @@ function renderItem(it, idx) {
   if (it.diff?.distorted && it.diff.sourceWindow && it.status !== 'لم يُعثر عليه') {
     card.append(diffBox(it.diff));
     opts.append(option(name, 'استبدال اللفظ بلفظ المصدر', false, set({ mode: 'source' }), null, 'swap'));
+  }
+
+  if (it.full && it.status !== 'لم يُعثر عليه') {
+    card.append(fullBox(it.full));
+    if (it.full.text.length <= FULL_MAX) opts.append(option(name, 'استبدال بالحديث كاملاً من المصدر', false, set({ mode: 'full' }), null, 'swap'));
   }
 
   if (['ضعيف', 'موضوع', 'مختلف فيه', 'لم يُعثر عليه'].includes(it.status)) {
@@ -501,8 +514,18 @@ $('analyze').addEventListener('click', async () => {
   } finally {
     busy(false);
     syncAnalyzeLabel();
+    showSourceNote();
   }
 });
+
+// يوضح للمستخدم إن كانت النتائج من المصدر الاحتياطي لا من الدرر
+function showSourceNote() {
+  let n = document.getElementById('srcnote');
+  if (!n) { n = el('p', 'badge'); n.id = 'srcnote'; $('mode').after(n); }
+  const local = activeRoute() === 'local';
+  n.hidden = !local;
+  n.textContent = local ? 'تعذّر الوصول إلى الدرر السنية الآن، فالنتائج من المصدر الاحتياطي (تسعة كتب من كتب السنة)، وقد لا تشمل كل أحكام المحدثين.' : '';
+}
 
 $('sample').addEventListener('click', () => { showReader(false); state.fileName = ''; textEl.value = SAMPLE; syncAnalyzeLabel(); });
 

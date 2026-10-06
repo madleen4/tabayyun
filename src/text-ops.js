@@ -84,7 +84,7 @@ export function removalRange(text, it) {
 }
 
 // يبني النص المصحح من اختيارات المستخدم.
-// choice: { mode: 'keep' | 'source' | 'alt' | 'remove', alt }
+// choice: { mode: 'keep' | 'source' | 'full' | 'alt' | 'remove', alt }
 // يعيد النص، ومواضع الأحاديث فيه (لحمايتها عند تعديل الصياغة)، ومواضع التعديلات، والمصادر.
 export function buildCorrected(text, items, choices) {
   const edits = [];
@@ -97,6 +97,9 @@ export function buildCorrected(text, items, choices) {
     } else if (c.mode === 'alt' && c.alt) {
       edits.push({ i, start: it.start, end: it.end, text: flat(c.alt.text) });
       sources.push(`«${flat(c.alt.text)}»${c.alt.partial ? ' (جزء من حديث)' : ''} ${citation(c.alt)}.`);
+    } else if (c.mode === 'full' && it.full?.text) {
+      edits.push({ i, start: it.start, end: it.end, text: flat(it.full.text) });
+      sources.push(`«${flat(it.full.text)}» ${citation(it.full)}.`);
     } else if (c.mode === 'remove') {
       edits.push({ i, ...removalRange(text, it), text: '', remove: true });
     } else if (it.status === 'ثابت' && it.diff?.ref && !it.diff.distorted) {
@@ -243,4 +246,13 @@ export function orderPdfItems(items) {
     l.items.sort((a, b) => (arabic ? b.x - a.x : a.x - b.x));
     return l.items.map((i) => i.str).join(' ').replace(/[ \t]+/g, ' ').trim();
   }).join('\n');
+}
+
+// إذا كان الحديث في المصدر أطول بكثير من نص المستخدم (اقتبس جزءاً منه)، يُعرض كاملاً
+// ويُتاح استبداله به. يعيد الرواية المرجعية أو null.
+export const FULL_MAX = 400;
+export function fullSource(quote, ref) {
+  if (!ref?.text) return null;
+  const n = plain(quote).split(' ').length;
+  return plain(ref.text).split(' ').length >= n * 1.6 + 3 ? ref : null;
 }

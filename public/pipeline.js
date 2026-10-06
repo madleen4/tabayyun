@@ -3,9 +3,10 @@ import { searchFromBrowser, activeRoute } from '/dorar-client.js';
 import { pickMatches, alignDiff, similarity, MATCH_THRESHOLD } from '/lib/match.js';
 import { decideStatus, classifyRuling } from '/lib/classify.js';
 import { normalizeArabic } from '/lib/normalize.js';
-import { hasArabic, trimQuotes, excerpt, MAX_ALT, plain, buildCorrected, splitForRephrase, applyRephrase } from '/lib/text-ops.js';
+import { hasArabic, trimQuotes, excerpt, MAX_ALT, plain, buildCorrected, splitForRephrase, applyRephrase, fullSource } from '/lib/text-ops.js';
 
-export { hasArabic, excerpt, buildCorrected };
+export { hasArabic, excerpt, buildCorrected, activeRoute };
+export { FULL_MAX } from '/lib/text-ops.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // مهلة بين طلبات الدرر احتراماً للخدمة؛ لا حاجة لها مع المصدر المحلي
@@ -77,8 +78,9 @@ export async function checkHadith(quote) {
     if (!diff || bad < diff.bad) diff = { ...d, bad };
     if (!bad) break;
   }
-  return { ...decision, diff, score: pick.best.score };
+  return { ...decision, diff, full: fullSource(quote, diff?.ref), score: pick.best.score };
 }
+
 
 // النص الطويل يُقسَّم إلى أجزاء عند حدود الفقرات (كل جزء حتى 6000 حرف)،
 // ويُرسل كل جزء وحده، ثم تُعاد المواضع إلى مكانها في النص الكامل.

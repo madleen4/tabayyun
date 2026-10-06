@@ -160,3 +160,17 @@ test('ترتيب مقاطع PDF: السطر العربي من اليمين إل�
   ];
   assert.equal(orderPdfItems(items), 'منشور\nقال رسول الله ﷺ : «الدين النصيحة».');
 });
+
+test('الحديث أطول في المصدر: يُعرض كاملاً ويُتاح الاستبدال به', async () => {
+  const { fullSource } = await import('../src/text-ops.js');
+  const ref = { text: 'طلب العلم فريضة على كل مسلم وواضع العلم عند غير أهله كمقلد الخنازير الجوهر واللؤلؤ والذهب', source: 'سنن ابن ماجه', number: '224', muhaddith: 'الألباني', ruling: 'ضعيف جدا' };
+  assert.equal(fullSource('طلب العلم فريضة على كل مسلم', ref), ref);
+  assert.equal(fullSource('صوموا تصحوا', { text: 'صوموا تصحوا' }), null);
+  assert.equal(fullSource('صوموا تصحوا', null), null);
+  const text = 'قال ﷺ: «طلب العلم فريضة على كل مسلم».';
+  const start = text.indexOf('طلب');
+  const it = { quote: 'طلب العلم فريضة على كل مسلم', start, end: start + 27, status: 'ضعيف', full: ref };
+  const out = buildCorrected(text, [it], [{ mode: 'full' }]);
+  assert.ok(out.text.includes('كمقلد الخنازير'));
+  assert.ok(out.sources[0].includes('سنن ابن ماجه (224)'));
+});
